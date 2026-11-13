@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>aap-headtracker</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Description>Experimental AirPods head-tracking bridge for Windows using the MagicAAP driver.</Description>
     <Authors>FIocker and contributors</Authors>
     <PackageLicenseExpression>GPL-3.0-only</PackageLicenseExpression>

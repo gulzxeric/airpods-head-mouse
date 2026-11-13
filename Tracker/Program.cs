@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Modified 2026-11-13 for AirPods Head Mouse: AirPods 5 protocol support and RTBuddy framing.
+// Modified 2026-11-13 for AirPods Head Mouse: AirPods model presets, motion decoding, and RTBuddy framing.
 
 using System.Buffers.Binary;
 using System.ComponentModel;
@@ -23,15 +23,15 @@ internal static class Program
 
         if (args is ["--self-test"]) return AirPods5SelfTest.Run();
 
-        var options = Options.Parse(args);
-        if (options.ShowHelp)
-        {
-            PrintHelp();
-            return 0;
-        }
-
         try
         {
+            var options = Options.Parse(args);
+            if (options.ShowHelp)
+            {
+                PrintHelp();
+                return 0;
+            }
+
             return options.Command switch
             {
                 Command.List => RunList(),
@@ -159,7 +159,7 @@ internal static class Program
         Console.WriteLine(device.Candidate.Path);
 
         await using var dump = RawDump.Open(options.RawDumpPath);
-        var decoder = new HeadTrackingDecoder(options.StartFormat == StartPacketFormat.AirPods5);
+        var decoder = new HeadTrackingDecoder(options.StartFormat, options.Model);
         var stopwatch = Stopwatch.StartNew();
         var sentStart = false;
         var headPackets = 0;
@@ -278,7 +278,7 @@ internal static class Program
         using var device = MagicAapDevice.Open(options);
         using var udp = new OpenTrackUdpSender(options.Host, options.Port);
         await using var dump = RawDump.Open(options.RawDumpPath);
-        var decoder = new HeadTrackingDecoder(options.StartFormat == StartPacketFormat.AirPods5);
+        var decoder = new HeadTrackingDecoder(options.StartFormat, options.Model);
 
         Console.WriteLine($"Opened {device.Candidate.Kind} interface ({device.IoMode} I/O).");
         Console.WriteLine(device.Candidate.Path);
@@ -362,7 +362,7 @@ internal static class Program
 
                 foreach (var packet in framer.Push(chunk))
                 {
-                    if (!HeadTrackingDecoder.IsHeadTrackingPacket(packet))
+                    if (!decoder.IsHeadTrackingPacket(packet))
                     {
                         continue;
                     }
@@ -497,7 +497,7 @@ internal static class Program
             await device.WritePacketAsync(packet.Bytes, cancellationToken);
             Console.WriteLine($"Sent {packet.Label} init packet {i + 1}/{packets.Count} ({packet.Bytes.Length} bytes): {Hex.Preview(packet.Bytes)}");
 
-            if (options.InitFormat is InitPacketFormat.RtBuddy && i < packets.Count - 1)
+            if (options.InitFormat is (InitPacketFormat.RtBuddy or InitPacketFormat.RtBuddyAacp) && i < packets.Count - 1)
             {
                 await Task.Delay(i % 2 == 0 ? 180 : 220, cancellationToken);
             }
@@ -550,7 +550,7 @@ internal static class Program
                 {
                     PrintPacketSummary(packet, decoder, ref headPackets);
                 }
-                else if (HeadTrackingDecoder.IsHeadTrackingPacket(packet))
+                else if (decoder.IsHeadTrackingPacket(packet))
                 {
                     headPackets++;
                 }
@@ -584,13 +584,13 @@ internal static class Program
     {
         var prefix = AapPackets.HasAapPrefix(packet) ? "AAP" : "raw";
         var opcode = packet.Length > 4 ? $" opcode=0x{packet[4]:X2}" : "";
-        var kind = HeadTrackingDecoder.IsHeadTrackingPacket(packet) ? " head" : "";
+        var kind = decoder.IsHeadTrackingPacket(packet) ? " head" : "";
         var rtBuddy = RtBuddyFrameInfo.TryParse(packet, out var frame)
             ? $" {frame.Describe()}"
             : "";
         Console.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {prefix}{opcode}{kind} len={packet.Length}{rtBuddy} {Hex.Preview(packet)}");
 
-        if (!HeadTrackingDecoder.IsHeadTrackingPacket(packet))
+        if (!decoder.IsHeadTrackingPacket(packet))
         {
             return;
         }
@@ -599,7 +599,7 @@ internal static class Program
         var sample = decoder.Process(packet);
         if (sample is null)
         {
-            Console.WriteLine($"  calibrating {decoder.CalibrationCount}/{HeadTrackingDecoder.CalibrationSampleCount}");
+            Console.WriteLine($"  calibrating {decoder.CalibrationCount}/{decoder.RequiredSamples}");
             return;
         }
 
@@ -623,8 +623,8 @@ internal static class Program
         Commands:
           aap-headtracker list
           aap-headtracker ipc    [--seconds N] [--command GetHeadphones]
-          aap-headtracker probe  [--seconds N] [--interface auto|private|service] [--path DEVICE_PATH] [--sync] [--no-init] [--init-format magicpods|librepods|rtbuddy|both] [--prestart-read-ms N] [--takeover] [--self-mac AA:BB:CC:DD:EE:FF] [--takeover-read-ms N] [--send-hex HEX] [--start-format magicpods|legacy|alternate|airpods5|devmotion6|max2|both] [--start-delay-ms N] [--head-mode 1|2|3] [--stop-mode 1|2|3] [--no-start] [--no-stop] [--dump]
-          aap-headtracker bridge [--seconds N] [--port 4242] [--host 127.0.0.1] [--interface auto|private|service] [--path DEVICE_PATH] [--sync] [--no-init] [--init-format magicpods|librepods|rtbuddy|both] [--prestart-read-ms N] [--takeover] [--self-mac AA:BB:CC:DD:EE:FF] [--takeover-read-ms N] [--send-hex HEX] [--start-format magicpods|legacy|alternate|airpods5|devmotion6|max2|both] [--start-delay-ms N] [--head-mode 1|2|3] [--stop-mode 1|2|3] [--no-start] [--no-stop] [--dump]
+          aap-headtracker probe  [--seconds N] [--interface auto|private|service] [--path DEVICE_PATH] [--sync] [--no-init] [--init-format magicpods|librepods|rtbuddy|rtbuddy-aacp|both] [--prestart-read-ms N] [--takeover] [--self-mac AA:BB:CC:DD:EE:FF] [--takeover-read-ms N] [--send-hex HEX] [--start-format magicpods|legacy|alternate|airpods5|devmotion6|max2|both] [--start-delay-ms N] [--head-mode 1|2|3] [--stop-mode 1|2|3] [--no-start] [--no-stop] [--dump]
+          aap-headtracker bridge [--seconds N] [--port 4242] [--host 127.0.0.1] [--interface auto|private|service] [--path DEVICE_PATH] [--sync] [--no-init] [--init-format magicpods|librepods|rtbuddy|rtbuddy-aacp|both] [--prestart-read-ms N] [--takeover] [--self-mac AA:BB:CC:DD:EE:FF] [--takeover-read-ms N] [--send-hex HEX] [--start-format magicpods|legacy|alternate|airpods5|devmotion6|max2|both] [--start-delay-ms N] [--head-mode 1|2|3] [--stop-mode 1|2|3] [--no-start] [--no-stop] [--dump]
 
         Notes:
           list   only enumerates and query-opens device interfaces.
@@ -635,6 +635,8 @@ internal static class Program
           auto   tries the private MagicAAP interface first, then the AAP service interface.
           sync   uses MagicPods-style blocking ReadFile/WriteFile instead of an overlapped FileStream.
           init   sends AirPods setup/notification packets before the head-tracking start packet.
+          --model airpods5|pro2|max2|airpods3|airpods4|pro1|pro3|max1 selects a Bluetooth preset.
+          Override --start-format to try alternate or legacy if a preset yields no data.
           init-format librepods sends the exact INIT + head-tracking notification request used by the LibrePods visualizer.
           init-format rtbuddy connects AACP services 0 and 4 at version 1.3 and requests both capability sets.
           prestart-read-ms drains and prints device replies before the head-tracking start packet.
@@ -763,8 +765,8 @@ internal readonly record struct RtBuddyFrameInfo(
         }
 
         var declaredLength = BinaryPrimitives.ReadUInt16LittleEndian(packet.Slice(10, 2));
-        var payloadLength = Math.Min(declaredLength, packet.Length - 12);
-        var reader = new ProtobufReader(packet.Slice(12, payloadLength));
+        if (declaredLength > packet.Length - 12) return false;
+        var reader = new ProtobufReader(packet.Slice(12, declaredLength));
         while (reader.TryRead(out var field))
         {
             if (field.Number != 7 || field.WireType != 2)
@@ -777,7 +779,8 @@ internal readonly record struct RtBuddyFrameInfo(
             {
                 if (commandField.Number == 1 && commandField.WireType == 0)
                 {
-                    service = checked((int)commandField.Varint);
+                    if (commandField.Varint > int.MaxValue) return false;
+                    service = (int)commandField.Varint;
                 }
                 else if (commandField.Number == 3 && commandField.WireType == 2)
                 {
@@ -1061,6 +1064,7 @@ internal enum InitPacketFormat
     MagicPods,
     LibrePods,
     RtBuddy,
+    RtBuddyAacp,
     Both
 }
 
@@ -1089,6 +1093,8 @@ internal sealed record Options(
     bool SyncIo,
     bool ShowHelp)
 {
+    public string? Model { get; init; }
+
     public static Options Parse(string[] args)
     {
         if (args.Length == 0 || Has(args, "--help") || Has(args, "-h") || Has(args, "/?"))
@@ -1130,16 +1136,19 @@ internal sealed record Options(
         var port = ParseInt(Value(args, "--port", "4242"), "--port");
         var rawDump = Has(args, "--dump") ? DefaultDumpPath() : ValueOrNull(args, "--dump-file");
         var useMax2Defaults = command is Command.Probe or Command.Bridge;
-        var initFormatText = Value(args, "--init-format", useMax2Defaults ? "rtbuddy" : "magicpods").ToLowerInvariant();
+        var model = ValueOrNull(args, "--model")?.ToLowerInvariant();
+        var preset = AirPodsPreset.Resolve(model);
+        var initFormatText = Value(args, "--init-format", preset?.Init ?? (useMax2Defaults ? "rtbuddy" : "magicpods")).ToLowerInvariant();
         var initFormat = initFormatText switch
         {
             "magicpods" => InitPacketFormat.MagicPods,
             "librepods" => InitPacketFormat.LibrePods,
             "rtbuddy" => InitPacketFormat.RtBuddy,
+            "rtbuddy-aacp" => InitPacketFormat.RtBuddyAacp,
             "both" => InitPacketFormat.Both,
             _ => throw new ArgumentException($"Unknown --init-format value '{initFormatText}'.")
         };
-        var startFormatText = Value(args, "--start-format", useMax2Defaults ? "max2" : "magicpods").ToLowerInvariant();
+        var startFormatText = Value(args, "--start-format", preset?.Start ?? (useMax2Defaults ? "max2" : "magicpods")).ToLowerInvariant();
         var startFormat = startFormatText switch
         {
             "magicpods" => StartPacketFormat.MagicPods,
@@ -1153,7 +1162,7 @@ internal sealed record Options(
         };
         var headMode = ParseMode(Value(args, "--head-mode", "2"), "--head-mode");
         var stopMode = ParseMode(Value(args, "--stop-mode", "1"), "--stop-mode");
-        var startDelayMs = ParseInt(Value(args, "--start-delay-ms", useMax2Defaults ? "0" : "750"), "--start-delay-ms");
+        var startDelayMs = ParseInt(Value(args, "--start-delay-ms", preset?.Delay ?? (useMax2Defaults ? "0" : "750")), "--start-delay-ms");
         if (startDelayMs < 0)
         {
             throw new ArgumentException("--start-delay-ms must be zero or greater.");
@@ -1194,7 +1203,7 @@ internal sealed record Options(
             SelfMac: ValueOrNull(args, "--self-mac"),
             RawSendPacket: ValueOrNull(args, "--send-hex") is { } sendHex ? Hex.Parse(sendHex) : null,
             SyncIo: Has(args, "--sync"),
-            ShowHelp: false);
+            ShowHelp: false) { Model = model };
     }
 
     private static Options Default(Command command) =>
@@ -1798,13 +1807,19 @@ internal static class AapPackets
 
     public static IEnumerable<NamedPacket> BuildInitPackets(InitPacketFormat format)
     {
-        if (format is InitPacketFormat.RtBuddy)
+        if (format is InitPacketFormat.RtBuddy or InitPacketFormat.RtBuddyAacp)
         {
             foreach (var packet in RtBuddyInitPackets)
             {
                 yield return packet;
             }
 
+            if (format is InitPacketFormat.RtBuddyAacp)
+            {
+                yield return new NamedPacket("AACP handshake", AapHandshake);
+                yield return new NamedPacket("AACP feature flags", Convert.FromHexString("040004004D00D700000000000000"));
+                yield return new NamedPacket("AACP notifications", MagicPodsNotificationAll);
+            }
             yield break;
         }
 
@@ -2359,39 +2374,41 @@ internal sealed class HeadTrackingDecoder
 
     private const double QuaternionScale = 32768.0;
     private readonly List<MotionQuaternion> _calibration = [];
-    private readonly AirPods5Pose? _airPods5;
+    private static readonly MotionQuaternion Pro2Frame = MotionQuaternion.Normalize(
+        new MotionQuaternion(-0.556423, 0.723507, -0.322324, -0.251074));
+    private readonly AirPods5Pose _relativeAxes = new();
+    private readonly bool _relativeAxesOnly;
+    private readonly bool _allowRelativeAxes;
+    private readonly bool _correctPro2Frame;
+    private bool? _useRelativeAxes;
     private MotionQuaternion _neutral;
 
-    public HeadTrackingDecoder(bool airPods5 = false)
+    public HeadTrackingDecoder(StartPacketFormat format, string? model = null)
     {
-        if (airPods5) _airPods5 = new AirPods5Pose();
+        _relativeAxesOnly = format == StartPacketFormat.AirPods5;
+        _allowRelativeAxes = format is StartPacketFormat.AirPods5 or StartPacketFormat.Alternate
+            or StartPacketFormat.Legacy or StartPacketFormat.Both;
+        _correctPro2Frame = model == "pro2";
     }
 
-    public int CalibrationCount => _airPods5?.CalibrationCount ?? _calibration.Count;
-    public int RequiredSamples => _airPods5 is null ? CalibrationSampleCount : AirPods5Pose.RequiredSamples;
-    public bool IsCalibrated { get; private set; }
+    public int CalibrationCount => _useRelativeAxes == true ? _relativeAxes.CalibrationCount : _calibration.Count;
+    public int RequiredSamples => _useRelativeAxes == true ? AirPods5Pose.RequiredSamples : CalibrationSampleCount;
+    private bool IsCalibrated { get; set; }
 
-    public static bool IsHeadTrackingPacket(ReadOnlySpan<byte> data)
-    {
-        return AirPods5Pose.IsMotionReport(data) || RtBuddyFrameInfo.TryGetCommandPayload(data, out var service, out var payload)
-            && service is 6 or 14 or 16
-            && payload.Length >= 58
-            && payload[0] == 1
-            && payload[9] == 3;
-    }
+    public bool IsHeadTrackingPacket(ReadOnlySpan<byte> data) =>
+        (_allowRelativeAxes && _useRelativeAxes != false && AirPods5Pose.IsMotionReport(data))
+        || (!_relativeAxesOnly && _useRelativeAxes != true && TryGetQuaternionPayload(data, out _));
 
     public HeadTrackingSample? Process(ReadOnlySpan<byte> packet)
     {
-        if (_airPods5 is not null) return _airPods5.Process(packet);
-
-        if (!RtBuddyFrameInfo.TryGetCommandPayload(packet, out var service, out var payload)
-            || service is not (6 or 14 or 16)
-            || payload.Length < 58
-            || payload[0] != 1
-            || payload[9] != 3)
+        if (_allowRelativeAxes && _useRelativeAxes != false && AirPods5Pose.IsMotionReport(packet))
         {
-            return null;
+            _useRelativeAxes = true;
+            return _relativeAxes.Process(packet);
         }
+
+        if (_relativeAxesOnly || _useRelativeAxes == true || !TryGetQuaternionPayload(packet, out var payload))
+            return null;
 
         var o1 = BinaryPrimitives.ReadInt16LittleEndian(payload.Slice(20, 2));
         var o2 = BinaryPrimitives.ReadInt16LittleEndian(payload.Slice(22, 2));
@@ -2404,11 +2421,15 @@ internal sealed class HeadTrackingDecoder
             return null;
         }
 
+        _useRelativeAxes = false;
         var quaternion = MotionQuaternion.Normalize(new MotionQuaternion(
             o1 / QuaternionScale,
             o2 / QuaternionScale,
             o3 / QuaternionScale,
             Math.Sqrt(Math.Max(0.0, 1.0 - vectorLengthSquared))));
+
+        if (_correctPro2Frame)
+            quaternion = MotionQuaternion.Multiply(MotionQuaternion.Multiply(Pro2Frame.Conjugate(), quaternion), Pro2Frame);
 
         if (!IsCalibrated)
         {
@@ -2429,6 +2450,8 @@ internal sealed class HeadTrackingDecoder
         }
 
         var (yaw, pitch, roll) = ToYawPitchRoll(relative);
+        // HeadTracker routes the corrected Pro 2 sensor's X rotation to physical pitch.
+        if (_correctPro2Frame) (pitch, roll) = (roll, pitch);
         var horizontalAcceleration = BinaryPrimitives.ReadInt16LittleEndian(payload.Slice(28, 2));
         var verticalAcceleration = BinaryPrimitives.ReadInt16LittleEndian(payload.Slice(30, 2));
 
@@ -2443,6 +2466,43 @@ internal sealed class HeadTrackingDecoder
             HorizontalAcceleration: horizontalAcceleration,
             VerticalAcceleration: verticalAcceleration);
     }
+
+    private static bool TryGetQuaternionPayload(ReadOnlySpan<byte> packet, out ReadOnlySpan<byte> payload)
+    {
+        if (RtBuddyFrameInfo.TryGetCommandPayload(packet, out var service, out payload)
+            && service is 6 or 14 or 16 && IsQuaternionReport(payload))
+            return true;
+
+        if (packet.Length < 12 || !AapPackets.HasAapPrefix(packet) || packet[4] != 0x17 || packet[5] != 0
+            || BinaryPrimitives.ReadUInt32LittleEndian(packet[6..]) != 0x00100000)
+            return false;
+
+        int declaredLength = BinaryPrimitives.ReadUInt16LittleEndian(packet[10..]);
+        if (declaredLength > packet.Length - 12) return false;
+
+        // RTBuddy also sends quaternion data in a sensor-stream message (field 3),
+        // which HeadTracker uses with AirPods Pro 2.
+        var reader = new ProtobufReader(packet.Slice(12, declaredLength));
+        while (reader.TryRead(out var field))
+        {
+            if (field.Number != 3 || field.WireType != 2) continue;
+            var stream = new ProtobufReader(field.Bytes);
+            while (stream.TryRead(out var inner))
+            {
+                if (inner.Number == 3 && inner.WireType == 2 && IsQuaternionReport(inner.Bytes))
+                {
+                    payload = inner.Bytes;
+                    return true;
+                }
+            }
+        }
+
+        payload = default;
+        return false;
+    }
+
+    private static bool IsQuaternionReport(ReadOnlySpan<byte> payload) =>
+        payload.Length >= 58 && payload[0] == 1 && payload[9] == 3;
 
     private static MotionQuaternion Average(IReadOnlyList<MotionQuaternion> samples)
     {
