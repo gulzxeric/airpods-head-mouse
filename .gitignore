@@ -1,0 +1,8 @@
+*.exe
+*.pdb
+*.hexlog
+*.zip
+bin/
+obj/
+publish/
+.vs/
