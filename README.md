@@ -2,11 +2,15 @@
 
 用支持头部追踪的 AirPods 在 Windows 上控制鼠标。转头移动光标，开启「点头左键」后可以点头点击。蓝牙直连时，AirPods 直接和电脑通信。
 
+**[直接下载 Windows x64 运行包（v0.2.0）](https://github.com/gulzxeric/airpods-head-mouse/releases/download/v0.2.0/AirPods-Head-Mouse-v0.2.0-windows-x64.zip)**
+
+运行包位于 Release 的 **Assets**，文件名为 `AirPods-Head-Mouse-v0.2.0-windows-x64.zip`。GitHub 的 **Code → Download ZIP** 和 **Source code (zip)** 提供源码，需要先构建才能运行。
+
 ## 开始使用
 
 需要 64 位 Windows 10 或 11、蓝牙，以及可用的 [MagicAAP 驱动](https://magicpods.app/magicaap/)。下载包里有鼠标程序、姿态采集程序和启动脚本。MagicAAP 由其维护者单独提供。
 
-1. 从 [Releases](https://github.com/gulzxeric/airpods-head-mouse/releases) 下载并解压 v0.2.0 或更新版本的 Windows ZIP。
+1. 下载上面的 Windows x64 运行包，右键 ZIP 选「全部解压缩」。在解压后的文件夹里，确认启动脚本和 `aap-headtracker.exe`、`AirCursorWindows.exe` 都在同一层。
 2. 按 [MagicAAP 安装文档](https://magicpods.app/magicaap/) 选适合你 Windows 版本的驱动。按 [Apple 的说明](https://support.apple.com/en-gb/108786#nonapple) 在 Windows 的蓝牙设置里配对并连接 AirPods。戴上两只耳机。如果 MagicPods 在占用耳机控制连接，从系统托盘退出它。
 3. 双击 `启动 AirPods 鼠标.cmd`，选耳机型号，再按 **T** 测试。先面朝屏幕片刻，再左右转头。终端应出现变化的 `YPR`，结束时 `sentSamples` 应大于 0。
 4. 重新运行启动脚本，选择同一型号，再按 **S**。等窗口显示「已收到姿态」，点「启用鼠标控制」。AirPods 5 也可以继续用原来的两个专用脚本。
@@ -21,6 +25,8 @@
 | 暂停或继续 | `Ctrl+Alt+F8`，或点击窗口里的按钮。 |
 | 重置姿态 | `Ctrl+Alt+F9`。 |
 | 退出 | 在采集终端按 `Ctrl+C`，再关闭鼠标窗口。 |
+
+`aap-headtracker.exe is missing` 表示脚本在同一目录找不到采集程序。请确认下载的是上面的运行包，并在完整解压后的目录里启动。如果正确解压后文件仍然缺失，可检查 Windows 安全中心的「保护历史记录」。
 
 `No MagicAAP/AAP device interfaces` 表示程序没有找到驱动接口。先确认耳机已连接，并在设备管理器的「蓝牙」分类里检查 MagicAAP。`headPackets=0` 表示采集程序还没读到姿态报告。如果提示 UDP 4242 被占用，退出占用该端口的 OpenTrack 或其他实例后重试。
 
